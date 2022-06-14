@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>円形オーディオビジュアライザ</title>
+    <script>
+        let canvas, context; // キャンバス 
+        const audioContext = new AudioContext(); // オーディオコンテキスト 
+        let sourceNode, audio;    // オーディオ用 Sourceノード 
+        let analyserNode, dataArray;     // Analyser ノード 
+        let gainNode;    // Gain ノード 
+        let hue = 0, baseAngle = 0;    // 色相、角度、    
+
+        const init = () => {
+            // キャンバスの取得 
+            canvas = document.getElementById("visualizer");
+            context = canvas.getContext("2d"); 
+            // オーディオ用 Sourceノードの作成 
+            audio = document.getElementById("audio");
+            sourceNode = audioContext.createMediaElementSource(audio);
+            // Analyser ノードの作成 
+            analyserNode = audioContext.createAnalyser();
+            analyserNode.fftSize = 256;
+            dataArray = new Uint8Array(analyserNode.frequencyBinCount);
+            // Gain ノードの作成、ボリュームの初期化 
+            gainNode = audioContext.createGain();
+            setVolume();
+            // ノードの接続 
+            sourceNode.connect(analyserNode);
+            analyserNode.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            // フルスクリーン解除用イベントの登録
+            canvas.addEventListener("click", exitFullscreen);
+            audio.addEventListener("ended", exitFullscreen);
+            // 解析開始 
+            analyze();
+        }
+
+        const loadAudio = files => {
+            // 選択したファイルをオーディオにセット
+            audio.src = URL.createObjectURL(files[0]);
+            audioContext.resume();
+            [hue, baseAngle] = [0.0];
+        }
+        const setVolume = () => {
+            // ボリュームの変更 
+            const volume = document.getElementById("volume").value;
+            gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+            document.getElementById("volumeText").innerHTML = `[${volume}]`;
+        }
+
+        const analyze = () => {
+            // 波形データ、巻き数を取得 
+            analyserNode.getByteFrequencyData(dataArray);
+            const num = document.getElementById("num").value;
+            //波形の描画 
+            context.fillStyle = "rgba(0,0,0,0.3)";
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            context.lineWidth = document.getElementById("w").value;
+            context.lineCap = "round";
+            const [cx, cy] = [canvas.width/2, canvas.height/2];
+            let [ox, oy] = [cx, cy];
+            for (let i = 0; i < dataArray.length; i++) {
+                const r = dataArray[i] / 256 * (canvas.height/2 - 50);
+                const angle = baseAngle + Math.PI * num / dataArray.length * i;
+                const x = cx + r * Math.cos(angle);
+                const y = cy + r * Math.sin(angle); 
+                let h = hue + i;
+                if (h > 360) h -= 360;
+                context.strokeStyle = `hsl(${h}, 100%, 50%)`;
+                context.beginPath();
+                if (document.getElementById("line").checked) {
+                    // 直線
+                    context.moveTo(cx, cy);
+                    context.lineTo(x, y);
+                }
+
+                if (document.getElementById("curve").checked) {
+                    //曲線 
+                    const x1 = cx + r * Math.cos(angle - Math.PI / 3);
+                    const y1 = cy + r * Math.sin(angle - Math.PI / 3);
+                    context.moveTo(cx, cy);
+                    context.quadraticCurveTo(x1, y1, x, y);
+                }
+                if (document.getElementById("polyline").checked) {
+                    // 折れ線 
+                    if ((ox != cx) && (oy != cy)) {
+                        context.moveTo(ox, oy);
+                        context.lineTo(x, y);
+                    }
+                }
+                context.stroke();
+                [ox, oy] = [x, y];
+            }
+            //更新
+            hue++;
+            if (hue > 360) {
+                hue -= 360;
+                if ((!audio.paused) && (document.getElementById("random").checked)) {
+                    //線の太さと巻き数をランダムに変更 
+                    const rnd1 = Math.ceil(Math.random() * 10);
+                    const rnd2 = Math.ceil(Math.random() * 10);
+                    document.getElementById("w").value = rnd1;
+                    document.getElementById("num").value = rnd2;
+                    //形状をランダムに変更 
+                    const rnd3 = Math.ceil(Math.random() * 7);
+                    document.getElementById("line").checked = false;
+                    document.getElementById("curve").checked = false;
+                    document.getElementById("polyline").checked = false;
+                    if ((rnd3 == 1) || (rnd3 == 3) || (rnd3 == 5) || (rnd3 == 7)) {
+                        document.getElementById("line").checked = true;
+                    }
+                    if ((rnd3 == 2) || (rnd3 == 3) || (rnd3 == 6) || (rnd3 == 7)) {
+                        document.getElementById("curve").checked = true;
+                    }
+                    if ((rnd3 == 4) || (rnd3 == 5) || (rnd3 == 6) || (rnd3 == 7)) {
+                        document.getElementById("polyline").checked = true;
+                    }
+                }
+            }
+            baseAngle += Math.PI / 1000;
+            window.requestAnimationFrame(analyze);
+        }
+        const fullscreen = () => {
+            // フルスクリーン 
+            if (!audio.paused) canvas.requestFullscreen();
+        }
+
+        const exitFullscreen = () => {
+            // フルスクリーンを解除 
+            if (document.fullscreenElement != null) {
+                document.exitFullscreen();
+            }
+        }
+    </script>
+    <style>
+        audio {
+            vertical-align: middle;
+        }
+
+        canvas {
+            background-color: #000000;
+        }
+
+        .border {
+            margin: 0px 10px;
+            border-right: thin solid #999999;
+        }
+    </style>
+</head>
+
+<body onload="init()">
+    <p>円形オーディオビジュアライザ-</p>
+    音楽ファイル
+    <input type="file" accept="audio/*" onchange="loadAudio(this. files)">
+    <audio id="audio" autoplay controls></audio>
+    ボリューム:
+    <input type="range" id="volume" min="0" max="1" step="0.1" value="0.5" onchange="setVolume()">
+    <span id="volumeText">[0.5]</span>
+    <hr>
+    線の太さ :
+    <input type="range" id="w" min="1" max="10" value="5">
+    巻き数: <input type="range" id="num" min="1" max="10" value="5">
+    <input type="checkbox" id="line" checked>直線
+    <input type="checkbox" id="curve">曲線
+    <input type="checkbox" id="polyline">折れ線
+    <span class="border"></span>
+    <input type="checkbox" id="random">ランダム
+    <span class="border"></span>
+    <input type="button" value="フルスクリーン" onclick="fullscreen()">
+    <hr> <canvas id="visualizer" width="800" height="600"></canvas>
+</body>
+
+</html>
